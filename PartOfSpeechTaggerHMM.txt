@@ -1,0 +1,109 @@
+#Python implementation of Part of speech tagger using Hidden Markov Models///////////////////////////////////////////////////////////
+
+# import python modules/////////////////////////////////////////////////
+import matplotlib.pyplot as plt
+import numpy as np
+import operator
+
+from IPython.core.display import HTML
+from itertools import chain
+from collections import Counter, defaultdict
+from helpers import show_model, Dataset
+from pomegranate import State, HiddenMarkovModel, DiscreteDistribution
+
+#Preprocessing of data/////////////////////////////////////////////////
+data = Dataset("tags-universal.txt", "brown-universal.txt", train_test_split=0.8)
+
+print("There are {} sentences in the corpus.".format(len(data)))
+print("There are {} sentences in the training set.".format(len(data.training_set)))
+print("There are {} sentences in the testing set.".format(len(data.testing_set)))
+
+#Implementing counters for probabilities//////////////////////////////
+#Unigram counter to count the occurence of each tag separately
+def unigram_counts(sequences):
+    """Returns a dict with count of each key(tag)
+    """
+    d={}
+    for seq in sequences:
+        for tag in seq:
+            if(tag in d):
+                d[tag]+=1
+            else:
+                d[tag]=1
+    return d
+
+tag_unigrams = unigram_counts(data.training_set.Y)
+
+#Bigram counter to count the occurence of consecutive tag pairs
+def bigram_counts(sequences):
+    """Returns a dict with count of each key(tag)
+    """
+    d={}
+    for seq in sequences:
+        for tag in zip(seq[:-1],seq[1:]):
+            if(tag in d):
+                d[tag]+=1
+            else:
+                d[tag]=1
+    return d
+        
+tag_bigrams = bigram_counts(data.training_set.Y)
+
+#Sequence starting with a tag counter
+def starting_counts(sequences):
+    """Returns a dict with count of each key(tag)
+    """
+    d={}
+    for seq in sequences:
+        if(seq[0] in d):
+            d[seq[0]]+=1
+        else:
+            d[seq[0]]=1
+    return d
+
+tag_starts = starting_counts(data.training_set.Y)
+
+#Sequence ending with a tag counter
+def ending_counts(sequences):
+    """Returns a dict with count of each key(tag)
+    """
+    d={}
+    for seq in sequences:
+        if(seq[-1] in d):
+            d[seq[-1]]+=1
+        else:
+            d[seq[-1]]=1
+    return d
+
+tag_ends = ending_counts(data.training_set.Y)
+
+#Implementing the HMM model/////////////////////////////////////////////////////
+basic_model = HiddenMarkovModel(name="base-hmm-tagger")
+
+emission_prob = {}
+tag_state={}
+for tag in emission_counts:
+    emission_prob[tag]={}
+    for word in emission_counts[tag]:       
+        emission_prob[tag][word] = emission_counts[tag][word]/tag_unigrams[tag]
+    tag_distr = DiscreteDistribution(emission_prob[tag])
+    tag_state[tag] = State(tag_distr, name=tag)
+    basic_model.add_states(tag_state[tag])
+
+num_sent= len(data.training_set.Y)
+for tag in tag_starts:
+    basic_model.add_transition(basic_model.start, tag_state[tag], tag_starts[tag]/num_sent)
+for tags in tag_bigrams:
+    basic_model.add_transition(tag_state[tags[0]],tag_state[tags[1]],tag_bigrams[tags]/tag_unigrams[tags[0]])
+    
+for tag in tag_ends:
+    basic_model.add_transition(tag_state[tag],basic_model.end, tag_ends[tag]/tag_unigrams[tag])
+
+basic_model.bake()
+
+#Training and testing the model////////////////////////////////////////////////
+hmm_training_acc = accuracy(data.training_set.X, data.training_set.Y, basic_model)
+print("training accuracy basic hmm model: {:.2f}%".format(100 * hmm_training_acc))
+
+hmm_testing_acc = accuracy(data.testing_set.X, data.testing_set.Y, basic_model)
+print("testing accuracy basic hmm model: {:.2f}%".format(100 * hmm_testing_acc))

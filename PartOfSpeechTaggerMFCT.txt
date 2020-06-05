@@ -1,0 +1,98 @@
+#Python implementation of Part of speech tagger using Most Frequent Class Tagger///////////////////////////////////////////////////////////
+
+# import python modules/////////////////////////////////////////////////
+import matplotlib.pyplot as plt
+import numpy as np
+import operator
+
+from IPython.core.display import HTML
+from itertools import chain
+from collections import Counter, defaultdict
+from helpers import show_model, Dataset
+from pomegranate import State, HiddenMarkovModel, DiscreteDistribution
+
+#Preprocessing of data/////////////////////////////////////////////////
+data = Dataset("tags-universal.txt", "brown-universal.txt", train_test_split=0.8)
+
+print("There are {} sentences in the corpus.".format(len(data)))
+print("There are {} sentences in the training set.".format(len(data.training_set)))
+print("There are {} sentences in the testing set.".format(len(data.testing_set)))
+
+#Implementing the counter functions for probabilities//////////////////////////
+#function to count word-tag pairs
+def pair_counts(sequences_A, sequences_B):
+    """Returns a dict with count of each key(tag)
+    """
+    d={}
+    for seq_num in range(len(sequences_A)):
+        for word,tag in zip(sequences_B[seq_num],sequences_A[seq_num]):
+            if(tag in d):
+                if(tag in d):
+                    if(word in d[tag]):
+                        d[tag][word]+=1
+                    else:
+                        d[tag][word]=1
+            else:
+                d[tag]={word:1}
+    return d
+emission_counts = pair_counts(data.training_set.Y,data.training_set.X)
+
+
+#Implementing Most Frequent Class Tagger////////////////////////////////////////
+from collections import namedtuple
+
+FakeState = namedtuple("FakeState", "name")
+
+class MFCTagger:
+    missing = FakeState(name="<MISSING>")
+    
+    def __init__(self, table):
+        self.table = defaultdict(lambda: MFCTagger.missing)
+        self.table.update({word: FakeState(name=tag) for word, tag in table.items()})
+        
+    def viterbi(self, seq):
+        """This method simplifies predictions by matching the Pomegranate viterbi() interface"""
+        return 0., list(enumerate(["<start>"] + [self.table[w] for w in seq] + ["<end>"])) 
+    #creates a list of tags as states with start and stop
+
+word_counts = pair_counts(data.training_set.X,data.training_set.Y)# TODO: YOUR CODE HERE)
+
+mfc_table = {}
+for word in word_counts:
+    mfc_table[word] = max(word_counts[word].items(), key=operator.itemgetter(1))[0]
+    
+mfc_model = MFCTagger(mfc_table) # Create a Most Frequent Class tagger instance
+
+
+#Making predictions with the model//////////////////////////////////////////////////////
+def replace_unknown(sequence):
+    return [w if w in data.training_set.vocab else 'nan' for w in sequence]
+
+def simplify_decoding(X, model):
+    """X should be a 1-D sequence of observations for the model to predict"""
+    _, state_path = model.viterbi(replace_unknown(X))
+    return [state[1].name for state in state_path[1:-1]]  # do not show the start/end state predictions
+    
+#Model accuracies/////////////////////////////////////////////////////////////////////
+def accuracy(X, Y, model):
+    correct = total_predictions = 0
+    for observations, actual_tags in zip(X, Y):
+        
+        # The model.viterbi call in simplify_decoding will return None if the HMM
+        # raises an error (for example, if a test sentence contains a word that
+        # is out of vocabulary for the training set). Any exception counts the
+        # full sentence as an error (which makes this a conservative estimate).
+        try:
+            most_likely_tags = simplify_decoding(observations, model)
+            correct += sum(p == t for p, t in zip(most_likely_tags, actual_tags))
+        except:
+            pass
+        total_predictions += len(observations)
+    return correct / total_predictions
+    
+mfc_training_acc = accuracy(data.training_set.X, data.training_set.Y, mfc_model)
+print("training accuracy mfc_model: {:.2f}%".format(100 * mfc_training_acc))
+
+mfc_testing_acc = accuracy(data.testing_set.X, data.testing_set.Y, mfc_model)
+print("testing accuracy mfc_model: {:.2f}%".format(100 * mfc_testing_acc))
+
